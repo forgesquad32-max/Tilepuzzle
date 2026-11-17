@@ -1,0 +1,7 @@
+build/
+build_test
+*.elf
+*.smdh
+*.3dsx
+*.cia
+*.bnr

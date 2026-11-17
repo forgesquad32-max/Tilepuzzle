@@ -1,0 +1,75 @@
+name: Build Tile Puzzle (.cia + .3dsx)
+
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  # 1) Unit tests of the puzzle logic (plain gcc, runs in a few seconds)
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run game-logic tests
+        run: make test
+
+  # 2) Compile for the 3DS inside the official devkitPro image
+  build:
+    needs: test
+    runs-on: ubuntu-latest
+    container: devkitpro/devkitarm:latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install 3DS libraries (libctru, citro2d, citro3d)
+        run: dkp-pacman -Sy --noconfirm --needed 3ds-dev
+
+      - name: Build .elf / .smdh / .3dsx
+        run: make
+
+      - name: Check outputs
+        run: ls -l tilepuzzle.elf tilepuzzle.smdh tilepuzzle.3dsx
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: build-files
+          path: |
+            tilepuzzle.elf
+            tilepuzzle.smdh
+            tilepuzzle.3dsx
+
+  # 3) Package the installable .cia (outside the container, so the prebuilt tools run fine)
+  package:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: build-files
+
+      - name: Get makerom and bannertool
+        run: |
+          mkdir -p tools
+          cd tools
+          wget -q https://github.com/3DSGuy/Project_CTR/releases/download/makerom-v0.18/makerom-v0.18-ubuntu_x86_64.zip
+          unzip -o makerom-v0.18-ubuntu_x86_64.zip makerom
+          wget -q https://github.com/diasurgical/bannertool/releases/download/1.2.0/bannertool.zip
+          unzip -o -j bannertool.zip "linux-x86_64/bannertool"
+          chmod +x makerom bannertool
+
+      - name: Build banner + .cia
+        run: |
+          ./tools/bannertool makebanner -i assets/banner.png -a assets/banner_audio.wav -o banner.bnr
+          ./tools/makerom -f cia -o tilepuzzle.cia -target t -exefslogo \
+            -elf tilepuzzle.elf -rsf app.rsf -icon tilepuzzle.smdh -banner banner.bnr
+          ls -l tilepuzzle.cia
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: TilePuzzle-3DS
+          path: |
+            tilepuzzle.cia
+            tilepuzzle.3dsx
